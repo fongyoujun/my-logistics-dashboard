@@ -1,237 +1,377 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 
-# --- 1. CONFIG & STYLING ---
-st.set_page_config(page_title="Advanced Logistics & Supply Chain Dashboard", layout="wide")
+# --- 1. 全局配置 (必须在最顶部，且全程序只能有一行) ---
+st.set_page_config(page_title="Logistics Intelligence Dashboard", layout="wide")
+
+# --- 2. 定义导航 (这一步必须在 if 判断之前！) ---
+st.sidebar.title("Main Navigation")
+# 这里的变量名必须叫 app_mode
+app_mode = st.sidebar.radio("Select Dashboard:",
+                            ["Logistics Performance (data.xlsx)", "Supply Chain Priorities (openpo.xlsx)"])
+
+# --- 3. Open PO 图表页面逻辑 ---
+if app_mode == "Supply Chain Priorities (openpo.xlsx)":
+    st.title("📊 Supply Chain Priorities Analysis")
+
+    try:
+        # 读取数据（根据你的 openpo.xlsx 结构，建议处理多级表头）
+        # 这里使用你的本地文件名
+        df_openpo = pd.read_excel("openpo.xlsx", header=[0, 1])
+
+        # 简单清洗：填充区域名并合并分类
+        df_openpo.iloc[:, 0] = df_openpo.iloc[:, 0].ffill()
+
+        # 侧边栏过滤区域
+        regions = df_openpo.iloc[:, 0].unique()
+        sel_region = st.sidebar.selectbox("Select Region", regions)
+        plot_df = df_openpo[df_openpo.iloc[:, 0] == sel_region]
+
+        # 提取周次列 (WK11, WK12, WK13...)
+        # 针对你的文件结构提取 PO 数量进行对比
+        wk_cols = [col for col in df_openpo.columns if 'WK' in str(col[0]) and col[1] == 'PO']
+
+        # 绘制柱状图
+        fig = go.Figure()
+        for wk in wk_cols:
+            fig.add_bar(x=plot_df.iloc[:, 1], y=plot_df[wk], name=wk[0])
+
+        fig.update_layout(title=f"Open PO Status - {sel_region}", barmode='group', template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("View Raw Data"):
+            st.dataframe(plot_df)
+
+    except Exception as e:
+        st.error(f"Error loading openpo.xlsx: {e}")
+
+    # 关键：停止运行，不进入下方的 Logistics 代码
+    st.stop()
+
+# --- 4. 粘贴 Part 1.txt 的内容 ---
+# 注意：请确保 Part 1.txt 里的代码没有再次定义 st.set_page_config
+# 如果 Part 1.txt 里也有 app_mode 的判断，请确保变量名统一。
+
+# [此处开始直接粘贴你 part 1.txt 的全部代码]
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+
+# --- 1. GLOBAL SETTINGS ---
+st.set_page_config(page_title="Logistics Intelligence Dashboard", layout="wide")
 
 st.markdown("""
     <style>
-    .main { background-color: #f4f7f6; }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        border-left: 5px solid #007bff;
-    }
-    .chart-desc { font-size: 14px; color: #666; margin-bottom: 20px; font-style: italic; }
-    .bcn-highlight {
-        padding: 15px; background-color: #e3f2fd; border-radius: 8px;
-        border: 1px solid #90caf9; margin-bottom: 20px; color: #0d47a1; font-weight: bold;
-    }
-    .section-header {
-        padding: 10px; background-color: #262730; color: white;
-        border-radius: 5px; margin-top: 25px; margin-bottom: 15px; font-weight: bold;
-    }
+    .main { background-color: #f8f9fa; }
+    section[data-testid="stSidebar"] { width: 320px !important; }
+    .stCheckbox { margin-bottom: -10px; }
+    .chart-title { font-size: 22px; font-weight: bold; color: #262730; margin-top: 25px; }
+    .chart-desc { font-size: 14px; color: #555; margin-bottom: 5px; }
+    .usage-note { font-size: 13px; color: #007bff; margin-bottom: 15px; font-style: italic; }
     </style>
     """, unsafe_allow_html=True)
 
 
 # --- 2. DATA ENGINE ---
-
 @st.cache_data
 def load_logistics_data():
     df = pd.read_excel("data.xlsx")
     m_order = {'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
                'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12}
     df['Month_Num'] = df['MO'].map(m_order)
+
+    def get_quarter(m):
+        if m in [1, 2, 3]: return 'Q1'
+        if m in [4, 5, 6]: return 'Q2'
+        if m in [7, 8, 9]: return 'Q3'
+        return 'Q4'
+
+    df['Quarter'] = df['Month_Num'].apply(get_quarter)
+
     df = df.sort_values(['YEAR', 'Month_Num'])
     df['Timeline'] = df['YEAR'].astype(str) + " " + df['MO']
+
+    # 基础汇总
+    df['Total_CBM'] = df['FCL/CBM'] + df['BCN/CBM'] + df['LCL/CBM']
+    df['Total_PO'] = df['FCL-PO'] + df['BCN-PO'] + df['LCL-PO']
+    df['Total_BL'] = df['FCL-BL'] + df['BCN-BL'] + df['LCL-BL']
+    df['Total_Item'] = df['FCL-ITEM'] + df['BCN-ITEM'] + df['LCL-ITEM']
+
+    df['FCL_Cost_Sum'] = df['FCL-20 COST'] + df['FCL-40 COST']
+    df['BCN_Cost_Sum'] = df['BCN-20 COST'] + df['BCN-40 COST']
+    df['LCL_Cost_Sum'] = df['LCL-COST']
+    df['Grand_Total_Cost'] = df['FCL_Cost_Sum'] + df['BCN_Cost_Sum'] + df['LCL_Cost_Sum']
+
+    # 深度计算：Avg Cost per CBM/PO
+    for mode in ['FCL', 'BCN', 'LCL', 'Total']:
+        cost_col = 'Grand_Total_Cost' if mode == 'Total' else f'{mode}_Cost_Sum'
+        cbm_col = 'Total_CBM' if mode == 'Total' else f'{mode}/CBM'
+        po_col = 'Total_PO' if mode == 'Total' else f'{mode}-PO'
+        item_col = 'Total_Item' if mode == 'Total' else f'{mode}-ITEM'
+        bl_col = 'Total_BL' if mode == 'Total' else f'{mode}-BL'
+
+        df[f'{mode}_Cost_per_CBM'] = df[cost_col] / df[cbm_col]
+        df[f'{mode}_Cost_per_PO'] = df[cost_col] / df[po_col]
+        df[f'{mode}_Items_per_PO'] = df[item_col] / df[po_col]
+        df[f'{mode}_POs_per_BL'] = df[po_col] / df[bl_col]
+
     df['BCN_Total_TEU'] = df['BCN-20'] + (df['BCN-40'] * 2)
     df['PO_per_TEU'] = df['BCN-PO'] / df['BCN_Total_TEU']
     return df
 
 
-@st.cache_data
-def load_open_po_data():
-    """解析 openpo.xlsx 数据"""
-    df_raw = pd.read_excel("openpo.xlsx", header=None)
-    # 定义周次所在列 (WK11:2, WK12:4, WK13:6)
-    weeks = {2: "WK11", 4: "WK12", 6: "WK13"}
-    # 定义区域起始行
-    regions = {"Local": 2, "Overseas": 7}
+# --- 3. CHART MODULES ---
 
-    res = []
-    for col, wk in weeks.items():
-        for reg, start_row in regions.items():
-            # 抓取关键指标
-            prio_po = df_raw.iloc[start_row, col]
-            prio_ln = df_raw.iloc[start_row, col + 1]
-            oos_po = df_raw.iloc[start_row + 1, col]
-            oos_it = df_raw.iloc[start_row + 1, col + 1]
-            low_po = df_raw.iloc[start_row + 2, col]
-            low_it = df_raw.iloc[start_row + 2, col + 1]
-            open_po = df_raw.iloc[start_row + 3, col]
-            open_ln = df_raw.iloc[start_row + 3, col + 1]
-
-            res.append({
-                "Week": wk, "Region": reg,
-                "Priority_PO": prio_po, "Priority_Line": prio_ln,
-                "Normal_PO": open_po, "Normal_Line": open_ln,
-                "Total_PO": prio_po + open_po, "Total_Line": prio_ln + open_ln,
-                "OOS_PO": oos_po, "OOS_Item": oos_it,
-                "Low_PO": low_po, "Low_Item": low_it
-            })
-    return pd.DataFrame(res)
-
-
-def apply_simple_slider(fig):
-    fig.update_xaxes(rangeslider_visible=True, rangeslider_thickness=0.04, rangeslider_bgcolor="rgba(0,123,255,0.1)")
-    fig.update_layout(margin=dict(l=10, r=10, t=30, b=40), template="plotly_white", hovermode="x unified")
+def apply_standard_layout(fig, y1_title, height=500):
+    fig.update_xaxes(rangeslider_visible=True, rangeslider_thickness=0.04)
+    fig.update_layout(
+        height=height, yaxis=dict(title=y1_title),
+        margin=dict(l=10, r=10, t=50, b=80),
+        template="plotly_white", hovermode="x unified"
+    )
     return fig
 
 
-# --- 3. CHART MODULES ---
+def module_deep_dive_correlation(df):
+    st.markdown('<div class="chart-title">Deep Dive: CBM, PO & Cost Correlation</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="chart-desc">Analyzes detailed relationship between Cargo Volume, Order Count, and Expenditure.</div>',
+        unsafe_allow_html=True)
+    st.markdown(
+        '<div class="usage-note">Usage: Solid lines with markers represent Cost/CBM. Dotted lines represent Cost/PO. Both are hidden by default.</div>',
+        unsafe_allow_html=True)
 
-def plot_volume_trend(df):
-    st.subheader("🚢 Total Volume Distribution (CBM)")
-    st.markdown('<p class="chart-desc">Cargo throughput across FCL, BCN, and LCL.</p>', unsafe_allow_html=True)
+    fig = go.Figure()
+    # 定义符号映射以增加辨识度
+    groups = [
+        ('TOTAL', '#333333', 'circle', df['Grand_Total_Cost'], df['Total_CBM'], df['Total_PO'],
+         df['Total_Cost_per_CBM'], df['Total_Cost_per_PO'], True),
+        ('FCL', '#1f77b4', 'square', df['FCL_Cost_Sum'], df['FCL/CBM'], df['FCL-PO'], df['FCL_Cost_per_CBM'],
+         df['FCL_Cost_per_PO'], False),
+        ('BCN', '#ff7f0e', 'diamond', df['BCN_Cost_Sum'], df['BCN/CBM'], df['BCN-PO'], df['BCN_Cost_per_CBM'],
+         df['BCN_Cost_per_PO'], False),
+        ('LCL', '#2ca02c', 'triangle-up', df['LCL_Cost_Sum'], df['LCL/CBM'], df['LCL-PO'], df['LCL_Cost_per_CBM'],
+         df['LCL_Cost_per_PO'], False)
+    ]
+
+    for label, color, symbol, cost, cbm, po, cp_cbm, cp_po, is_vis in groups:
+        vis = True if is_vis else "legendonly"
+        # 1. 基础指标
+        fig.add_trace(
+            go.Scatter(x=df['Timeline'], y=cost, name=f"{label} COST", yaxis='y2', line=dict(color=color, width=4),
+                       visible=vis))
+        fig.add_trace(
+            go.Bar(x=df['Timeline'], y=cbm, name=f"{label} CBM", marker_color=color, opacity=0.3, visible=vis))
+        fig.add_trace(
+            go.Scatter(x=df['Timeline'], y=po, name=f"{label} PO", line=dict(color=color, width=2, dash='dash'),
+                       visible=vis))
+
+        # 2. 优化后的 AVG 指标：Cost/CBM 改为实线+标记
+        fig.add_trace(go.Scatter(
+            x=df['Timeline'], y=cp_cbm, name=f"{label} AVG COST/CBM",
+            yaxis='y2', visible="legendonly",
+            mode='lines+markers',
+            marker=dict(symbol=symbol, size=8),
+            line=dict(color=color, width=2.5)
+        ))
+
+        # 3. 优化后的 AVG 指标：Cost/PO 保持虚线
+        fig.add_trace(go.Scatter(
+            x=df['Timeline'], y=cp_po, name=f"{label} AVG COST/PO",
+            yaxis='y2', visible="legendonly",
+            mode='lines',
+            line=dict(color=color, width=1.5, dash='dot')
+        ))
+
+    fig = apply_standard_layout(fig, "CBM & PO Scale", height=800)
+    fig.update_layout(
+        yaxis2=dict(title="Cost & Avg metrics ($)", overlaying='y', side='right', showgrid=False),
+        legend=dict(orientation="h", y=1.3, x=0.5, xanchor="center", yanchor="top", entrywidth=150,
+                    entrywidthmode="pixels"),
+        margin=dict(t=250)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def module_documentation_efficiency(df):
+    st.markdown('<div class="chart-title">LC(BL) & PO & ITEM Density Analysis</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="chart-desc">Tracks documentation efficiency and item-to-order density across shipping modes.</div>',
+        unsafe_allow_html=True)
+    st.markdown(
+        '<div class="usage-note">Usage: Multi-select modes to compare. Use the density lines (right axis) to evaluate consolidation efficiency.</div>',
+        unsafe_allow_html=True)
+
+    selected_modes = st.multiselect("Select Modes to Compare:", ["Total", "FCL", "BCN", "LCL"],
+                                    default=["Total", "FCL"], key="doc_modes")
+    if not selected_modes:
+        st.info("Please select at least one mode.")
+        return
+
+    fig = go.Figure()
+    color_map = {
+        'Total': {'BL': '#333333', 'PO': '#555555', 'ITEM': '#777777', 'Line1': '#000000', 'Line2': '#444444'},
+        'FCL': {'BL': '#A6ACEC', 'PO': '#636EFA', 'ITEM': '#19D3F3', 'Line1': '#EF553B', 'Line2': '#00CC96'},
+        'BCN': {'BL': '#FECB52', 'PO': '#FFA15A', 'ITEM': '#FF6692', 'Line1': '#AB63FA', 'Line2': '#19D3F3'},
+        'LCL': {'BL': '#B6E880', 'PO': '#2CA02C', 'ITEM': '#FF97FF', 'Line1': '#FECB52', 'Line2': '#B6E880'}
+    }
+
+    for mode in selected_modes:
+        item_col = 'Total_Item' if mode == 'Total' else f'{mode}-ITEM'
+        bl_col = 'Total_BL' if mode == 'Total' else f'{mode}-BL'
+        po_col = 'Total_PO' if mode == 'Total' else f'{mode}-PO'
+
+        fig.add_trace(
+            go.Bar(x=df['Timeline'], y=df[item_col], name=f'{mode} ITEM', marker_color=color_map[mode]['ITEM'],
+                   opacity=0.5))
+        fig.add_trace(go.Bar(x=df['Timeline'], y=df[bl_col], name=f'{mode} BL', marker_color=color_map[mode]['BL']))
+        fig.add_trace(go.Bar(x=df['Timeline'], y=df[po_col], name=f'{mode} PO', marker_color=color_map[mode]['PO']))
+        fig.add_trace(go.Scatter(x=df['Timeline'], y=df[f'{mode}_Items_per_PO'], name=f'{mode} Items/PO', yaxis='y2',
+                                 line=dict(color=color_map[mode]['Line1'], width=3)))
+        fig.add_trace(go.Scatter(x=df['Timeline'], y=df[f'{mode}_POs_per_BL'], name=f'{mode} POs/BL', yaxis='y2',
+                                 line=dict(color=color_map[mode]['Line2'], width=2, dash='dot')))
+
+    fig = apply_standard_layout(fig, "Volume Count", height=750)
+    fig.update_layout(
+        barmode='group', yaxis2=dict(title="Density Ratio", overlaying='y', side='right', showgrid=False),
+        legend=dict(orientation="h", y=1.22, x=0.5, xanchor="center", yanchor="top", entrywidth=140,
+                    entrywidthmode="pixels"),
+        margin=dict(t=180)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def module_volume_trend(df):
+    st.markdown('<div class="chart-title">🚢 Total Volume Distribution (CBM)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-desc">Visualizes the contribution of each shipping mode to total monthly CBM.</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="usage-note">Usage: Hover over bars to see exact CBM per mode. Use the range slider below to zoom into specific periods.</div>',
+        unsafe_allow_html=True)
     fig = px.bar(df, x='Timeline', y=['FCL/CBM', 'BCN/CBM', 'LCL/CBM'], barmode='stack',
-                 color_discrete_sequence=px.colors.qualitative.Safe)
-    st.plotly_chart(apply_simple_slider(fig), use_container_width=True)
+                 color_discrete_sequence=['#1f77b4', '#ff7f0e', '#2ca02c'])
+    st.plotly_chart(apply_standard_layout(fig, "CBM Volume"), use_container_width=True)
 
 
-def plot_efficiency_analysis(df):
-    st.subheader("📈 Efficiency Analysis: Density per Mode (CBM/PO)")
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(x=df['Timeline'], y=df['FCL-AVG CBM/PO'], name='FCL (CBM/PO)', line=dict(color='#FF4B4B', width=3)))
-    fig.add_trace(go.Scatter(x=df['Timeline'], y=df['BCN-AVG CBM/PO'], name='BCN (CBM/PO)',
-                             line=dict(color='#1C83E1', width=2, dash='dash')))
-    fig.add_trace(go.Scatter(x=df['Timeline'], y=df['LCL-AVG CBM/PO'], name='LCL (CBM/PO)',
-                             line=dict(color='#28A745', width=2, dash='dot')))
-    st.plotly_chart(apply_simple_slider(fig), use_container_width=True)
-
-
-def plot_po_vs_cbm_dual(df):
-    st.subheader("🔗 Order Load Analysis: Workload (PO) vs Volume (CBM)")
-    fig = go.Figure()
-    total_po = df['FCL-PO'] + df['BCN-PO'] + df['LCL-PO']
-    total_cbm = df['FCL/CBM'] + df['BCN/CBM'] + df['LCL/CBM']
-    fig.add_trace(go.Bar(x=df['Timeline'], y=total_po, name='Total PO Count', marker_color='#D3D3D3', opacity=0.7))
-    fig.add_trace(go.Scatter(x=df['Timeline'], y=total_cbm, name='Total CBM Volume', yaxis='y2',
-                             line=dict(color='#007bff', width=4)))
-    fig.update_layout(yaxis=dict(title="PO Count"), yaxis2=dict(title="CBM", overlaying='y', side='right'),
-                      legend=dict(orientation="h", y=1.1, x=0.5, xanchor="center"))
-    st.plotly_chart(apply_simple_slider(fig), use_container_width=True)
-
-
-def plot_composition_pies(df):
-    st.subheader("🍰 Portfolio Composition (Period-Specific)")
+def module_portfolio_composition_pies(df):
+    st.markdown('<div class="chart-title">🍰 Portfolio Composition</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-desc">Percentage breakdown of Volume and Order count for a selected period.</div>',
+                unsafe_allow_html=True)
+    st.markdown(
+        '<div class="usage-note">Usage: Change the Year or Months below to update the composition analysis.</div>',
+        unsafe_allow_html=True)
     c_f1, c_f2 = st.columns(2)
-    with c_f1:
-        p_year = st.selectbox("Pie Year Selection", options=sorted(df['YEAR'].unique(), reverse=True), key="pie_yr")
-    with c_f2:
-        p_months = st.multiselect("Pie Month Selection", options=df['MO'].unique(), default=df['MO'].unique(),
-                                  key="pie_mo")
+    with c_f1: p_year = st.selectbox("Select Year", options=sorted(df['YEAR'].unique(), reverse=True), key="p_y")
+    with c_f2: p_months = st.multiselect("Select Months", options=df['MO'].unique(), default=df['MO'].unique(),
+                                         key="p_m")
     pie_df = df[(df['YEAR'] == p_year) & (df['MO'].isin(p_months))]
     if not pie_df.empty:
-        c1, c2 = st.columns(2)
-        cbm_vals = [pie_df['FCL/CBM'].sum(), pie_df['BCN/CBM'].sum(), pie_df['LCL/CBM'].sum()]
-        c1.plotly_chart(px.pie(values=cbm_vals, names=['FCL', 'BCN', 'LCL'], title="CBM Share"),
-                        use_container_width=True)
-        po_vals = [pie_df['FCL-PO'].sum(), pie_df['BCN-PO'].sum(), pie_df['LCL-PO'].sum()]
-        c2.plotly_chart(px.pie(values=po_vals, names=['FCL', 'BCN', 'LCL'], title="PO Share"), use_container_width=True)
+        col1, col2 = st.columns(2)
+        col1.plotly_chart(px.pie(values=[pie_df['FCL/CBM'].sum(), pie_df['BCN/CBM'].sum(), pie_df['LCL/CBM'].sum()],
+                                 names=['FCL CBM', 'BCN CBM', 'LCL CBM'], title="CBM Share",
+                                 color_discrete_sequence=['#1f77b4', '#ff7f0e', '#2ca02c']), use_container_width=True)
+        col2.plotly_chart(px.pie(values=[pie_df['FCL-PO'].sum(), pie_df['BCN-PO'].sum(), pie_df['LCL-PO'].sum()],
+                                 names=['FCL PO', 'BCN PO', 'LCL PO'], title="PO Share",
+                                 color_discrete_sequence=['#1f77b4', '#ff7f0e', '#2ca02c']), use_container_width=True)
 
 
-def plot_bcn_teu_analysis(df):
-    st.subheader("🚛 BCN Loading Efficiency: PO per TEU")
-    avg_val = df['BCN-PO'].sum() / df['BCN_Total_TEU'].sum() if df['BCN_Total_TEU'].sum() > 0 else 0
-    st.markdown(f'<div class="bcn-highlight">📍 Average Efficiency: <b>{avg_val:.2f}</b> POs per TEU</div>',
+def module_efficiency_analysis(df):
+    st.markdown('<div class="chart-title">📈 Efficiency Analysis (CBM/PO)</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="chart-desc">Measures how much cargo (CBM) is packed into each PO on average. Higher is usually more efficient.</div>',
+        unsafe_allow_html=True)
+    st.markdown(
+        '<div class="usage-note">Usage: Compare the stability of FCL vs BCN/LCL packing efficiency over time.</div>',
+        unsafe_allow_html=True)
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(x=df['Timeline'], y=df['FCL-AVG CBM/PO'], name='FCL Density', line=dict(color='#FF4B4B', width=3)))
+    fig.add_trace(go.Scatter(x=df['Timeline'], y=df['BCN-AVG CBM/PO'], name='BCN Density',
+                             line=dict(color='#1C83E1', width=2, dash='dash')))
+    fig.add_trace(go.Scatter(x=df['Timeline'], y=df['LCL-AVG CBM/PO'], name='LCL Density',
+                             line=dict(color='#28A745', width=2, dash='dot')))
+    st.plotly_chart(apply_standard_layout(fig, "CBM per PO"), use_container_width=True)
+
+
+def module_bcn_performance(df):
+    st.markdown('<div class="chart-title">🚛 BCN Loading Efficiency</div>', unsafe_allow_html=True)
+    st.markdown('<div class="chart-desc">Analyzes BCN performance by measuring PO count per TEU.</div>',
                 unsafe_allow_html=True)
+    st.markdown(
+        '<div class="usage-note">Usage: Monitor the orange line; an upward trend indicates more orders are consolidated into fewer containers.</div>',
+        unsafe_allow_html=True)
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df['Timeline'], y=df['BCN_Total_TEU'], name='Total TEU', marker_color='#1f77b4'))
-    fig.add_trace(go.Scatter(x=df['Timeline'], y=df['PO_per_TEU'], name='PO per TEU', yaxis='y2',
-                             line=dict(color='#ff7f0e', width=3), mode='lines+markers'))
-    fig.update_layout(yaxis=dict(title="TEUs"), yaxis2=dict(title="Ratio", overlaying='y', side='right'),
-                      barmode='group')
-    st.plotly_chart(apply_simple_slider(fig), use_container_width=True)
+    fig.add_trace(go.Scatter(x=df['Timeline'], y=df['PO_per_TEU'], name='PO/TEU Ratio', yaxis='y2',
+                             line=dict(color='#ff7f0e', width=3)))
+    fig = apply_standard_layout(fig, "TEU Count")
+    fig.update_layout(yaxis2=dict(title="PO/TEU Ratio", overlaying='y', side='right', showgrid=False))
+    st.plotly_chart(fig, use_container_width=True)
 
 
-def plot_regional_supply_chain(region_name, df_po):
-    """为 Local/Overseas 展示 Open PO 内容"""
-    st.markdown(f'<div class="section-header">📍 {region_name.upper()} Supply Chain Status</div>',
-                unsafe_allow_html=True)
-    sub = df_po[df_po['Region'] == region_name]
-
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.write("**Weekly Trend: Priority + Normal PO**")
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=sub['Week'], y=sub['Priority_PO'], name="Priority PO", marker_color="#FF4B4B"))
-        fig.add_trace(go.Bar(x=sub['Week'], y=sub['Normal_PO'], name="Normal PO", marker_color="#D3D3D3"))
-        fig.add_trace(go.Scatter(x=sub['Week'], y=sub['Total_Line'], name="Total Lines", yaxis="y2",
-                                 line=dict(color="#1C83E1", width=3)))
-        fig.update_layout(barmode='stack', yaxis2=dict(overlaying='y', side='right', title="Lines Count"),
-                          legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        st.write("**OOS & Low Stock (Latest Week)**")
-        latest = sub.iloc[-1]
-        fig = go.Figure(data=[
-            go.Bar(name='PO Count', x=['OOS', 'Low Stock'], y=[latest['OOS_PO'], latest['Low_PO']],
-                   marker_color="#262730"),
-            go.Bar(name='Item Count', x=['OOS', 'Low Stock'], y=[latest['OOS_Item'], latest['Low_Item']],
-                   marker_color="#007bff")
-        ])
-        fig.update_layout(barmode='group', height=400, legend=dict(orientation="h", y=-0.2))
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# --- 4. MAIN LAYOUT ---
+# --- 5. MAIN ---
 def main():
     try:
         data_log = load_logistics_data()
-        data_po = load_open_po_data()
-
         with st.sidebar:
-            st.title("🎛️ Control Panel")
-            # 物流全局过滤
-            sel_yrs = st.multiselect("1. Global Year Filter", options=sorted(data_log['YEAR'].unique(), reverse=True),
-                                     default=sorted(data_log['YEAR'].unique()))
-            sel_mos = st.multiselect("2. Global Month Filter", options=data_log['MO'].unique(),
-                                     default=data_log['MO'].unique())
-
+            st.title("🎛️ Dashboard Filters")
+            sel_yrs = sidebar_checkbox_group("Years", sorted(data_log['YEAR'].unique(), reverse=True))
             st.markdown("---")
-            # 图表选择
-            log_opts = {"Total Volume (CBM)": plot_volume_trend, "Efficiency (CBM/PO)": plot_efficiency_analysis,
-                        "Workload vs Volume": plot_po_vs_cbm_dual, "Composition (Pies)": plot_composition_pies,
-                        "BCN TEU Efficiency": plot_bcn_teu_analysis}
-            selected_log = st.multiselect("3. Logistics Charts", options=list(log_opts.keys()),
-                                          default=list(log_opts.keys()))
+            sel_qtrs = sidebar_checkbox_group("Quarters", ['Q1', 'Q2', 'Q3', 'Q4'])
+            st.markdown("---")
+            sel_mos = sidebar_checkbox_group("Months",
+                                             ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT',
+                                              'NOV', 'DEC'])
+            st.markdown("---")
 
-            # 供应链区域选择
-            po_regions = st.multiselect("4. Supply Chain Regions", options=["Local", "Overseas"],
-                                        default=["Local", "Overseas"])
+            st.write("**Active Charts**")
+            charts_config = {
+                "Deep Dive: CBM, PO & Cost Correlation": module_deep_dive_correlation,
+                "LC(BL) & PO & ITEM Density Analysis": module_documentation_efficiency,
+                "🚢 Total Volume Distribution (CBM)": module_volume_trend,
+                "🍰 Portfolio Composition": module_portfolio_composition_pies,
+                "📈 Efficiency Analysis (CBM/PO)": module_efficiency_analysis,
+                "🚛 BCN Loading Efficiency": module_bcn_performance
+            }
+            active_list = []
+            for name in charts_config.keys():
+                if st.checkbox(name, value=True, key=f"active_{name}"):
+                    active_list.append(name)
 
-        st.title("Integrated Logistics & Supply Chain Dashboard")
+        st.title("Logistics Intelligence Dashboard")
+        f_df = data_log[
+            (data_log['YEAR'].isin(sel_yrs)) & (data_log['Quarter'].isin(sel_qtrs)) & (data_log['MO'].isin(sel_mos))]
+        if f_df.empty:
+            st.warning("No data matches current filters.");
+            return
 
-        # 应用过滤
-        filt_df = data_log[(data_log['YEAR'].isin(sel_yrs)) & (data_log['MO'].isin(sel_mos))]
-
-        # KPI Metrics
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total CBM", f"{filt_df[['FCL/CBM', 'BCN/CBM', 'LCL/CBM']].sum().sum():,.0f}")
-        c2.metric("PO Managed", f"{filt_df[['FCL-PO', 'BCN-PO', 'LCL-PO']].sum().sum():,.0f}")
-        c3.metric("BL Issued", f"{filt_df[['FCL/BL', 'BCN/BL', 'LCL/BL']].sum().sum():,.0f}")
-        c4.metric("Avg FCL Density", f"{filt_df['FCL-AVG CBM/PO'].mean():.2f}")
+        c1.metric("Total CBM", f"{f_df['Total_CBM'].sum():,.0f}")
+        c2.metric("PO Managed", f"{f_df['Total_PO'].sum():,.0f}")
+        c3.metric("Grand Cost", f"${f_df['Grand_Total_Cost'].sum():,.0f}")
+        c4.metric("Items SKU", f"{f_df['Total_Item'].sum():,.0f}")
         st.markdown("---")
 
-        # 渲染物流图表
-        for chart in selected_log:
-            log_opts[chart](filt_df)
-            st.markdown("---")
-
-        # 渲染供应链区域图表
-        for region in po_regions:
-            plot_regional_supply_chain(region, data_po)
+        for name in active_list:
+            charts_config[name](f_df)
             st.markdown("---")
 
     except Exception as e:
         st.error(f"Dashboard Error: {e}")
+
+
+def sidebar_checkbox_group(title, options, default=True):
+    st.write(f"**{title}**")
+    selected = []
+    cols = st.columns(2) if len(options) > 4 else [st.container()]
+    for i, opt in enumerate(options):
+        col = cols[i % len(cols)]
+        if col.checkbox(str(opt), value=default, key=f"f_{title}_{opt}"):
+            selected.append(opt)
+    return selected
 
 
 if __name__ == "__main__":
