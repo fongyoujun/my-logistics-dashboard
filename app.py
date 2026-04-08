@@ -113,17 +113,6 @@ def show_logistics_dashboard():
                 active_list.append(name)
 
 
-            # ==================== 新增：刷新功能代码 ====================
-            st.markdown("---")
-            st.write("🔄 **Data Controls**")
-            # 使用绝对唯一的 key: "btn_manual_refresh_001" 避免冲突
-            if st.button("Refresh Data From GitHub", key="btn_manual_refresh_001",
-                         help="清除缓存并重新读取 Excel 文件"):
-                st.cache_data.clear()  # 清除 @st.cache_data 装饰的函数缓存
-                st.toast("Refreshing data...")  # 在页面底部显示一个小的黑色提示框
-                st.rerun()  # 强制重启应用
-            # =========================================================
-
     # 主区域
     st.title("Logistics Intelligence Dashboard")
     f_df = df[(df['YEAR'].isin(sel_yrs)) & (df['Quarter'].isin(sel_qtrs)) & (df['MO'].isin(sel_mos))]
