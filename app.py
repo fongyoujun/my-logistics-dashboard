@@ -112,11 +112,6 @@ def show_logistics_dashboard():
             if st.checkbox(name, value=True, key=f"active_{name}"):
                 active_list.append(name)
 
-        # ... 你原有的过滤器代码 ...
-        active_list = []
-        for name in charts_config.keys():
-            if st.checkbox(name, value=True, key=f"active_{name}"):
-                active_list.append(name)
 
             # ==================== 新增：刷新功能代码 ====================
             st.markdown("---")
